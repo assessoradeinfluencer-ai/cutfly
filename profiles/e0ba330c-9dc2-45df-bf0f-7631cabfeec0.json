@@ -1,0 +1,12 @@
+{
+  "id": "e0ba330c-9dc2-45df-bf0f-7631cabfeec0",
+  "metrics": {
+    "total_scenes": 3,
+    "avg_speed": 2.0,
+    "class_counts": {
+      "moderate": 3
+    },
+    "jumpcut": "baixo",
+    "ritmo": "moderado"
+  }
+}
