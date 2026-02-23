@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Cutfly – Teste Rápido</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 24px; }
+    h2 { margin-top: 28px; }
+    .card { border: 1px solid #ddd; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+    button { padding: 10px 14px; border: 0; background: #0ea5e9; color: #fff; border-radius: 6px; cursor: pointer; }
+    input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
+    pre { background: #f7f7f7; padding: 12px; border-radius: 6px; overflow: auto; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .muted { color: #666; }
+    a { color: #0ea5e9; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>Cutfly – Painel de Teste</h1>
+  <p class="muted">Suba vídeos, crie perfil de estilo, gere roteiro e processe automaticamente.</p>
+
+  <div class="card">
+    <h2>1) Upload de vídeos (estilo ou gravações)</h2>
+    <input id="files" type="file" multiple accept="video/*">
+    <div style="margin-top:10px">
+      <button onclick="uploadMany()">Enviar</button>
+    </div>
+    <div id="uploadsResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>2) Criar Perfil de Estilo</h2>
+    <p class="muted">Informe até 3 IDs retornados no upload (separados por vírgula)</p>
+    <input id="styleIds" type="text" placeholder="id1,id2,id3">
+    <div style="margin-top:10px">
+      <button onclick="createStyleProfile()">Criar perfil</button>
+    </div>
+    <div id="styleResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>3) Gerar Roteiro</h2>
+    <input id="prompt" type="text" placeholder="Ex.: Quero um vídeo explicando X para Y em Z minutos">
+    <div class="row" style="margin-top:10px">
+      <input id="duration" type="text" placeholder="Duração (min)" value="5">
+      <input id="styleProfileId" type="text" placeholder="style_profile_id (opcional)">
+    </div>
+    <div style="margin-top:10px">
+      <button onclick="generateScript()">Gerar roteiro</button>
+      <button onclick="openTeleprompter()">Abrir teleprompter</button>
+    </div>
+    <div id="scriptResult"></div>
+    <div style="margin-top:10px">
+      <h3>Texto do roteiro</h3>
+      <pre id="scriptPlain" style="background:#f7f7f7;padding:12px;border-radius:6px;white-space:pre-wrap;"></pre>
+      <div style="margin-top:8px">
+        <button id="recStart" onclick="startRecording()">Gravar narração</button>
+        <button id="recStop" onclick="stopRecording()" disabled>Parar</button>
+        <span id="recTimer">00:00</span>
+      </div>
+      <div id="recStatus"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4) Processar vídeo (motor automático)</h2>
+    <input id="jobFiles" type="file" accept="video/*" multiple>
+    <div style="margin-top:10px">
+      <button onclick="createJob()">Processar</button>
+    </div>
+    <div id="jobStatus"></div>
+    <div id="jobResults"></div>
+  </div>
+
+  <div class="card">
+    <h2>5) Projeto Multi-Vídeo (um vídeo final)</h2>
+    <p class="muted">Cole os IDs dos vídeos (da etapa 1) separados por vírgula.</p>
+    <input id="projectIds" type="text" placeholder="id1,id2,id3,...">
+    <div style="margin-top:10px">
+      <input id="narrationFile" type="file" accept="audio/*">
+      <button onclick="uploadNarration()">Enviar narração</button>
+      <span id="narrationStatus" class="muted"></span>
+    </div>
+    <div style="margin-top:10px">
+      <button onclick="createProject()">Criar projeto</button>
+    </div>
+    <div id="projectStatus"></div>
+  </div>
+
+  <script>
+    async function uploadMany() {
+      const filesEl = document.getElementById('files');
+      const files = filesEl.files;
+      if (!files || files.length === 0) return;
+      const form = new FormData();
+      for (const f of files) form.append('files', f);
+      const res = await fetch('/uploads', { method: 'POST', body: form });
+      const data = await res.json();
+      document.getElementById('uploadsResult').innerHTML =
+        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    }
+
+    async function createProject() {
+      const idsText = document.getElementById('projectIds').value.trim();
+      const video_ids = idsText ? idsText.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const payload = { video_ids };
+      if (window._lastScript) {
+        payload.script = window._lastScript;
+      }
+      if (window._narration_path) {
+        payload.narration_path = window._narration_path;
+      }
+      const res = await fetch('/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      document.getElementById('projectStatus').innerHTML =
+        `Projeto: <b>${data.project_id}</b> — status: ${data.status} <button onclick="pollProject('${data.project_id}')">Acompanhar</button>`;
+    }
+
+    async function pollProject(projectId) {
+      const res = await fetch('/projects/' + projectId);
+      const data = await res.json();
+      let html = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+      if (data.output) {
+        html += `<p><a href="/files?path=${encodeURIComponent(data.output)}" target="_blank">Baixar vídeo final (MP4)</a></p>`;
+      }
+      if (data.subtitles) {
+        html += `<p><a href="/files?path=${encodeURIComponent(data.subtitles)}" target="_blank">Baixar legendas (SRT)</a></p>`;
+      }
+      html += `<button onclick="pollProject('${projectId}')">Atualizar status</button>`;
+      document.getElementById('projectStatus').innerHTML = html;
+    }
+    async function createStyleProfile() {
+      const idsText = document.getElementById('styleIds').value.trim();
+      const ids = idsText ? idsText.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const res = await fetch('/style-profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ids)
+      });
+      const data = await res.json();
+      document.getElementById('styleResult').innerHTML =
+        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    }
+
+    async function generateScript() {
+      const prompt = document.getElementById('prompt').value.trim();
+      const duration = parseInt(document.getElementById('duration').value.trim() || '5', 10);
+      const styleId = document.getElementById('styleProfileId').value.trim() || null;
+      const q = new URLSearchParams({ prompt, duration_minutes: duration });
+      if (styleId) q.append('style_profile_id', styleId);
+      const res = await fetch('/scripts?' + q.toString(), { method: 'POST' });
+      const data = await res.json();
+      document.getElementById('scriptResult').innerHTML =
+        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+      window._lastScript = data;
+      const plain = data.full_text || '';
+      document.getElementById('scriptPlain').innerText = plain;
+      window._lastScriptText = plain;
+    }
+
+    async function uploadNarration() {
+      const f = document.getElementById('narrationFile').files[0];
+      if (!f) return;
+      const form = new FormData();
+      form.append('file', f);
+      document.getElementById('narrationStatus').innerText = 'Enviando...';
+      const res = await fetch('/narrations', { method: 'POST', body: form });
+      const data = await res.json();
+      if (data && data.path) {
+        window._narration_path = data.path;
+        document.getElementById('narrationStatus').innerText = 'Narração enviada ✔';
+      } else {
+        document.getElementById('narrationStatus').innerText = 'Falha ao enviar narração';
+      }
+    }
+
+    async function createJob() {
+      const filesEl = document.getElementById('jobFiles');
+      const files = filesEl.files;
+      if (!files || files.length === 0) return;
+      let html = '';
+      for (const f of files) {
+        const form = new FormData();
+        form.append('video', f);
+        const res = await fetch('/jobs', { method: 'POST', body: form });
+        const data = await res.json();
+        html += `Job para ${f.name}: <b>${data.job_id}</b> — status: ${data.status} <button onclick="pollJob('${data.job_id}')">Acompanhar</button><br>`;
+      }
+      document.getElementById('jobStatus').innerHTML = html;
+      document.getElementById('jobResults').innerHTML = '';
+    }
+
+    async function pollJob(jobId) {
+      const res = await fetch('/jobs/' + jobId);
+      const data = await res.json();
+      document.getElementById('jobStatus').innerHTML =
+        `<pre>${JSON.stringify(data, null, 2)}</pre>
+         <button onclick="pollJob('${jobId}')">Atualizar status</button>`;
+      if (data.status === 'completed') {
+        const rres = await fetch('/results/' + jobId);
+        const rdata = await rres.json();
+        let html = `<h3>Resultados</h3><pre>${JSON.stringify(rdata, null, 2)}</pre>`;
+        if (rdata.analysis) {
+          html += `<p><a href="/files?path=${encodeURIComponent(rdata.analysis)}" target="_blank">Baixar análise</a></p>`;
+        }
+        if (rdata.timeline) {
+          html += `<p><a href="/files?path=${encodeURIComponent(rdata.timeline)}" target="_blank">Baixar timeline (Resolve)</a></p>`;
+        }
+        if (rdata.clips && rdata.clips.length) {
+          html += `<h4>Clipes</h4><ul>`;
+          for (const c of rdata.clips.slice(0, 20)) {
+            html += `<li><a href="/files?path=${encodeURIComponent(c)}" target="_blank">${c.split('/').pop()}</a></li>`;
+          }
+          html += `</ul>`;
+        }
+        document.getElementById('jobResults').innerHTML = html;
+      } else {
+        setTimeout(() => pollJob(jobId), 4000);
+      }
+    }
+
+    function openTeleprompter() {
+      let text = window._lastScriptText || '';
+      if (!text) {
+        const s = window._lastScript;
+        if (s && s.structure) {
+          const parts = [];
+          if (s.structure.hook) parts.push(s.structure.hook);
+          if (Array.isArray(s.structure.blocos)) {
+            for (const b of s.structure.blocos) {
+              parts.push(b.content || '');
+            }
+          }
+          if (s.structure.cta) parts.push(s.structure.cta);
+          text = parts.join('\n\n');
+        } else {
+          text = document.getElementById('prompt').value.trim();
+        }
+      }
+      const url = '/ui/teleprompter.html?text=' + encodeURIComponent(text);
+      window.open(url, '_blank');
+    }
+
+    let mediaRecorder = null;
+    let recChunks = [];
+    let recTimerId = null;
+    let recSeconds = 0;
+
+    function updateTimer() {
+      recSeconds += 1;
+      const m = String(Math.floor(recSeconds / 60)).padStart(2, '0');
+      const s = String(recSeconds % 60).padStart(2, '0');
+      document.getElementById('recTimer').innerText = `${m}:${s}`;
+    }
+
+    async function startRecording() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        document.getElementById('recStatus').innerText = 'Gravação não suportada neste navegador.';
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      recChunks = [];
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) recChunks.push(e.data);
+      };
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(recChunks, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        document.getElementById('recStatus').innerHTML =
+          `<a href="${url}" download="narracao.webm">Baixar narração</a>`;
+      };
+      mediaRecorder.start();
+      recSeconds = 0;
+      document.getElementById('recTimer').innerText = '00:00';
+      recTimerId = setInterval(updateTimer, 1000);
+      document.getElementById('recStart').disabled = true;
+      document.getElementById('recStop').disabled = false;
+      document.getElementById('recStatus').innerText = 'Gravando...';
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      if (recTimerId) {
+        clearInterval(recTimerId);
+        recTimerId = null;
+      }
+      document.getElementById('recStart').disabled = false;
+      document.getElementById('recStop').disabled = true;
+      document.getElementById('recStatus').innerText = 'Gravação finalizada.';
+    }
+
+  </script>
+</body>
+</html>
