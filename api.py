@@ -7,7 +7,6 @@ import json
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from typing import Optional
-from analyze_advanced5 import fallback_simple_analysis
 
 
 app = FastAPI()
@@ -16,8 +15,24 @@ app = FastAPI()
 jobs = {}
 projects = {}
 
+def fallback_simple_analysis_local(video_path, output_dir, max_scene_length=40, default_speed=1.0):
+import json
+from pathlib import Path
+scenes = [{
+"scene_num": 1, "start_time": 0.0, "duration": 10.0, "speed": float(default_speed), "classification": "moderate"
+}]
+analysis = {
+"video": Path(video_path).name,
+"scenes": scenes,
+"showcases": [],
+"summary": {"original_duration": 10.0, "output_duration": 10.0, "compression_ratio": 0, "interesting": 0, "moderate": 1, "low": 0, "boring": 0, "skip": 0}
+}
+out_path = Path(output_dir) / f"scene_analysis_{Path(video_path).stem}.json"
+with open(out_path, "w") as f:
+json.dump(analysis, f, indent=2)
+return out_path
 
-def simple_extract_pipeline(video_path: Path, base_dir: Path):
+def fallback_simple_analysis_local(str(video_path), str(output_dir)):
     output_dir = video_path.parent
     # 1) análise simples gera scene_analysis_*.json
     fallback_simple_analysis(str(video_path), str(output_dir))
